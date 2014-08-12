@@ -4,6 +4,8 @@ Stories-ByCreator-Lookback
 ## Overview
 This new version of [Stories by Creator](https://help.rallydev.com/stories-creator) from the [Rally App Catalog](https://github.com/RallyApps/app-catalog) uses the Lookback API to query for the "Snapshot 0" of a Story, and find the Story's creator from the first snapshot. This is faster than the old way of parsing the Revision History of the Story to find the information.
 
+![App Screenshot](https://raw.githubusercontent.com/markwilliams970/Stories-ByCreator-Lookback/master/images/screenshot1.png)
+
 ## License
 
 This App is released under the MIT license.  See the file [LICENSE](./LICENSE) for the full text.
