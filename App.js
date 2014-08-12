@@ -1,0 +1,289 @@
+Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    items: [
+        {
+            xtype: 'container',
+            itemId: 'controlsContainer',
+            columnWidth: 1
+        },
+        {
+            xtype: 'container',
+            itemId: 'gridContainer',
+            columnWidth: 1
+        }
+    ],
+
+    _currentUser: null,
+    _currentUserName: null,
+    _snapshotStore: null,
+    _storyRecords: [],
+    _storyCreatorsByStoryOID: {},
+    _usersByUserOID: {},
+    _storyGrid: null,
+
+    launch: function() {
+
+        var me = this;
+
+        // Get currently logged-in user
+        me._currentUser = this.getContext().getUser();
+        me._currentUserName = me._currentUser._refObjectName;
+
+        // First let's build a cache of UserNames by User ObjectID so we
+        // can hydrate a friendly username onto the lookback data
+        // (which contains only User OIDs)
+        var userStore = Ext.create('Rally.data.wsapi.Store', {
+            model: 'User',
+            fetch: true,
+            autoLoad: true,
+            limit: Infinity,
+            filters: [
+                {
+                    property: 'UserName',
+                    operator: 'contains',
+                    value: '@'
+                }
+            ],
+            listeners: {
+                load: function(store, data, success) {
+                    Ext.Array.each(data, function(record){
+                        var userOID = record.get('ObjectID');
+                        me._usersByUserOID[userOID.toString()] = record;
+                    });
+
+                    me.setLoading("Retrieving Stories...");
+
+                    // Now go get Story Data from Lookback
+                    // Query for story snapshot 0's
+                    me._getStoryZeroSnapshots();
+                }
+            }
+        });
+    },
+
+    _getStoryZeroSnapshots: function() {
+
+        var me = this;
+
+        var currentUserOID = me._currentUser.ObjectID;
+        var currentProjectOID = parseInt(me.getContext().getProjectRef().match(/\d+/), 10);
+
+        this._snapshotStore = Ext.create('Rally.data.lookback.SnapshotStore', {
+            autoLoad : true,
+            limit: Infinity,
+            listeners: {
+                load: this._processSnapShotZeroData,
+                scope : this
+            },
+            fetch: ['ObjectID','Name','_User','FormattedID','Priority','ScheduleState', 'PlanEstimate','TaskEstimateTotal','TaskRemainingTotal'],
+            hydrate: ['FormattedID','ScheduleState','_User'],
+            context: {
+                workspace: me.getContext().getWorkspaceRef(),
+                project: me.getContext().getProjectRef(),
+                projectScopeUp: me.getContext().getProjectScopeUp(),
+                projectScopeDown: me.getContext().getProjectScopeDown()
+            },
+            filters: [
+                {
+                    property: '_TypeHierarchy',
+                    operator: 'in',
+                    value: ['HierarchicalRequirement']
+                },
+                {
+                    property: '_ProjectHierarchy',
+                    value: currentProjectOID
+                },
+                // Note - by grabbing Snapshot zero - we may be including stories that have been
+                // deleted!
+                {
+                    property: '_SnapshotNumber',
+                    value: 0
+                }
+            ]
+        });
+    },
+
+    _processSnapShotZeroData : function(store, data, success) {
+
+        var me = this;
+
+        Ext.Array.each(data, function(record) {
+            var creationDateTime = me._nicerDateString(record.get('_ValidFrom'));
+            var userOID = record.get('_User');
+            var storyOID = record.get('ObjectID').toString();
+            var userHydrated = me._usersByUserOID[userOID.toString()];
+
+            var storyCreator;
+            if (userHydrated) {
+                var userName = userHydrated.get("UserName");
+                var displayName = userHydrated.get("DisplayName");
+
+                if (displayName !== "") {
+                    storyCreator = displayName;
+                } else {
+                    storyCreator = userName;
+                }
+            } else {
+                storyCreator = "Unknown/Deleted User";
+            }
+            me._storyCreatorsByStoryOID[storyOID] = storyCreator;
+        });
+
+        me._getStoryCurrentSnapshots();
+    },
+
+    _getStoryCurrentSnapshots: function() {
+        var me = this;
+
+        var currentUserOID = me._currentUser.ObjectID;
+        var currentProjectOID = parseInt(me.getContext().getProjectRef().match(/\d+/), 10);
+
+        this._snapshotStore = Ext.create('Rally.data.lookback.SnapshotStore', {
+            autoLoad : true,
+            limit: Infinity,
+            listeners: {
+                load: this._processCurrentSnapShotData,
+                scope : this
+            },
+            fetch: ['ObjectID','Name','_User','FormattedID','Priority','ScheduleState', 'PlanEstimate','TaskEstimateTotal','TaskRemainingTotal'],
+            hydrate: ['FormattedID','ScheduleState','_User'],
+            context: {
+                workspace: me.getContext().getWorkspaceRef(),
+                project: me.getContext().getProjectRef(),
+                projectScopeUp: me.getContext().getProjectScopeUp(),
+                projectScopeDown: me.getContext().getProjectScopeDown()
+            },
+            filters: [
+                {
+                    property: '_TypeHierarchy',
+                    operator: 'in',
+                    value: ['HierarchicalRequirement']
+                },
+                {
+                    property: '_ProjectHierarchy',
+                    value: currentProjectOID
+                },
+                {
+                    property: '__At',
+                    value: 'current'
+                }
+            ]
+        });
+    },
+
+    _processCurrentSnapShotData : function(store, data, success) {
+
+        var me = this;
+        records = [];
+
+        Ext.Array.each(data, function(record) {
+            var creationDateTime = me._nicerDateString(record.get('_ValidFrom'));
+            var userOID = record.get('_User');
+            var storyOID = record.get('ObjectID').toString();
+            var storyCreator = me._storyCreatorsByStoryOID[storyOID];
+
+            var newRecord = {
+                "_ref"          : "/hierarchicalrequirement/" + record.get('ObjectID'),
+                "FormattedID"   : record.get('FormattedID'),
+                "ObjectID"      : record.get('ObjectID'),
+                "Name"          : record.get('Name'),
+                "ScheduleState" : record.get('ScheduleState'),
+                "CreationDate"  : creationDateTime,
+                "UserOID"       : record.get('_User'),
+                "Creator"       : storyCreator
+            };
+            records.push(newRecord);
+        });
+
+        me._storyRecords = records;
+        me._makeGrid();
+    },
+
+    _sortArrays: function(arr, sortArr) {
+        var result = [];
+        for(var i=0; i < arr.length; i++) {
+            result[i] = arr[sortArr[i]];
+        }
+        return result;
+    },
+
+    _stringArrayToIntArray: function(stringArray) {
+        var result = [];
+        Ext.Array.each(stringArray, function(thisString) {
+            result.push(parseInt(thisString, 10));
+        });
+        return result;
+    },
+
+    _makeGrid : function() {
+
+        var me = this;
+
+        if (me._storyGrid) {
+            me._storyGrid.destroy();
+        }
+
+        me.setLoading(false);
+
+        var gridStore = Ext.create('Rally.data.custom.Store', {
+            data: me._storyRecords,
+            groupField: 'Creator',
+            pageSize: 200,
+            remoteSort: false
+        });
+
+        me._storyGrid = Ext.create('Rally.ui.grid.Grid', {
+            itemId: 'storyGrid',
+            store: gridStore,
+            features: [
+                {
+                    ftype:'groupingsummary',
+                    startCollapsed: true
+                }
+            ],
+            columnCfgs: [
+                {
+                    text: 'Created By', dataIndex: 'Creator'
+                },
+                {
+                    text: 'Formatted ID', dataIndex: 'FormattedID', xtype: 'templatecolumn',
+                    tpl: Ext.create('Rally.ui.renderer.template.FormattedIDTemplate')
+                },
+                {
+                    text: 'Name', dataIndex: 'Name', flex: 1
+                },
+                {   text: 'ScheduleState', dataIndex: 'ScheduleState'
+                },
+                {
+                    text: 'Date Created', dataIndex: 'CreationDate', flex: 1
+                }
+            ]
+        });
+
+        me.down('#gridContainer').add(me._storyGrid);
+        me._storyGrid.reconfigure(gridStore);
+
+    },
+
+    _nicerDateString: function(datestring) {
+
+        return datestring.replace(/T/," ").replace(/Z/, " UTC");
+
+    },
+
+    _noArtifactsNotify: function() {
+
+        if (this._storyGrid) {
+            this._storyGrid.destroy();
+        }
+
+        me.setLoading(false);
+
+        this._storyGrid = this.down('#gridContainer').add({
+            xtype: 'container',
+            html: "No Stories found."
+        });
+    }
+
+});
