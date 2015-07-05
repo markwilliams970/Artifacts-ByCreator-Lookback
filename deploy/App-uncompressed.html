@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Stories-ByCreator</title>
+    <title>Artifacts-ByCreator</title>
 
-    <script type="text/javascript" src="https://rally1.rallydev.com/apps/2.0rc3/sdk.js"></script>
+    <script type="text/javascript" src="/apps/2.0/sdk.js"></script>
 
     <script type="text/javascript">
         Rally.onReady(function () {
@@ -23,15 +23,52 @@
         }
     ],
 
+    _artifactTypeCombobox: null,
+    _selectedArtifactType: null,
     _currentUser: null,
     _currentUserName: null,
     _snapshotStore: null,
-    _storyRecords: [],
-    _storyCreatorsByStoryOID: {},
+    _artifactRecords: [],
+    _artifactCreatorsByArtifactOID: {},
     _usersByUserOID: {},
-    _storyGrid: null,
+    _artifactGrid: null,
 
     launch: function() {
+
+        // console.log('launch');
+
+        var me = this;
+
+        var artifactTypesStore = Ext.create('Ext.data.Store', {
+            fields: ['name', 'type'],
+            data: [
+                {"name": "Portfolio Item", "type": "PortfolioItem"},
+                {"name": "User Story",     "type": "HierarchicalRequirement"},
+                {"name": "Defect",         "type": "Defect"},
+                {"name": "Test Case",      "type": "TestCase"},
+                {"name": "Task",           "type": "Task"}
+            ]
+        });
+
+        me._artifactTypeCombobox = Ext.create('Ext.form.ComboBox', {
+            fieldLabel:   'Choose Artifact Type',
+            store:        artifactTypesStore,
+            queryMode:    'local',
+            displayField: 'name',
+            valueField:   'type',
+            listeners: {
+                scope: this,
+                'select': me._getUserInfo
+            }
+        });
+
+        me.down("#controlsContainer").add(me._artifactTypeCombobox);
+
+    },
+
+    _getUserInfo: function() {
+
+        // console.log('_getUserInfo');
 
         var me = this;
 
@@ -61,19 +98,22 @@
                         me._usersByUserOID[userOID.toString()] = record;
                     });
 
-                    me.setLoading("Retrieving Stories...");
+                    me.setLoading("Retrieving Artifacts...");
 
                     // Now go get Story Data from Lookback
                     // Query for story snapshot 0's
-                    me._getStoryZeroSnapshots();
+                    me._getArtifactZeroSnapshots();
                 }
             }
         });
     },
 
-    _getStoryZeroSnapshots: function() {
+    _getArtifactZeroSnapshots: function() {
+
+        // console.log('_getArtifactZeroSnapshots');
 
         var me = this;
+        me._selectedArtifactType = me._artifactTypeCombobox.getValue();
 
         var currentUserOID = me._currentUser.ObjectID;
         var currentProjectOID = parseInt(me.getContext().getProjectRef().match(/\d+/), 10);
@@ -85,8 +125,9 @@
                 load: this._processSnapShotZeroData,
                 scope : this
             },
-            fetch: ['ObjectID','Name','_User','FormattedID','Priority','ScheduleState', 'PlanEstimate','TaskEstimateTotal','TaskRemainingTotal'],
-            hydrate: ['FormattedID','ScheduleState','_User'],
+            fetch: ['ObjectID','Name','_User','FormattedID'],
+            hydrate: ['FormattedID','_User'],
+            removeUnauthorizedSnapshots : true,
             context: {
                 workspace: me.getContext().getWorkspaceRef(),
                 project: me.getContext().getProjectRef(),
@@ -97,7 +138,7 @@
                 {
                     property: '_TypeHierarchy',
                     operator: 'in',
-                    value: ['HierarchicalRequirement']
+                    value: [me._selectedArtifactType]
                 },
                 {
                     property: '_ProjectHierarchy',
@@ -115,12 +156,14 @@
 
     _processSnapShotZeroData : function(store, data, success) {
 
+        // console.log('_processSnapShotZeroData');
+
         var me = this;
 
         Ext.Array.each(data, function(record) {
             var creationDateTime = me._nicerDateString(record.get('_ValidFrom'));
             var userOID = record.get('_User');
-            var storyOID = record.get('ObjectID').toString();
+            var artifactOID = record.get('ObjectID').toString();
             var userHydrated = me._usersByUserOID[userOID.toString()];
 
             var storyCreator;
@@ -129,20 +172,23 @@
                 var displayName = userHydrated.get("DisplayName");
 
                 if (displayName !== "") {
-                    storyCreator = displayName;
+                    artifactCreator = displayName;
                 } else {
-                    storyCreator = userName;
+                    artifactCreator = userName;
                 }
             } else {
-                storyCreator = "Unknown/Deleted User";
+                artifactCreator = "Unknown/Deleted User";
             }
-            me._storyCreatorsByStoryOID[storyOID] = storyCreator;
+            me._artifactCreatorsByArtifactOID[artifactOID] = artifactCreator;
         });
 
-        me._getStoryCurrentSnapshots();
+        me._getArtifactCurrentSnapshots();
     },
 
-    _getStoryCurrentSnapshots: function() {
+    _getArtifactCurrentSnapshots: function() {
+
+        // console.log('_getArtifactCurrentSnapshots');
+
         var me = this;
 
         var currentUserOID = me._currentUser.ObjectID;
@@ -155,8 +201,9 @@
                 load: this._processCurrentSnapShotData,
                 scope : this
             },
-            fetch: ['ObjectID','Name','_User','FormattedID','Priority','ScheduleState', 'PlanEstimate','TaskEstimateTotal','TaskRemainingTotal'],
-            hydrate: ['FormattedID','ScheduleState','_User'],
+            fetch: ['ObjectID','Name','_User','FormattedID'],
+            hydrate: ['FormattedID','_User'],
+            removeUnauthorizedSnapshots : true,
             context: {
                 workspace: me.getContext().getWorkspaceRef(),
                 project: me.getContext().getProjectRef(),
@@ -167,7 +214,7 @@
                 {
                     property: '_TypeHierarchy',
                     operator: 'in',
-                    value: ['HierarchicalRequirement']
+                    value: [me._selectedArtifactType]
                 },
                 {
                     property: '_ProjectHierarchy',
@@ -183,33 +230,37 @@
 
     _processCurrentSnapShotData : function(store, data, success) {
 
+        // console.log('_processCurrentSnapShotData');
+
         var me = this;
         records = [];
 
         Ext.Array.each(data, function(record) {
             var creationDateTime = me._nicerDateString(record.get('_ValidFrom'));
             var userOID = record.get('_User');
-            var storyOID = record.get('ObjectID').toString();
-            var storyCreator = me._storyCreatorsByStoryOID[storyOID];
+            var artifactOID = record.get('ObjectID').toString();
+            var artifactCreator = me._artifactCreatorsByArtifactOID[artifactOID];
 
             var newRecord = {
-                "_ref"          : "/hierarchicalrequirement/" + record.get('ObjectID'),
+                "_ref"          : me._selectedArtifactType + "/" + record.get('ObjectID'),
                 "FormattedID"   : record.get('FormattedID'),
                 "ObjectID"      : record.get('ObjectID'),
                 "Name"          : record.get('Name'),
-                "ScheduleState" : record.get('ScheduleState'),
                 "CreationDate"  : creationDateTime,
                 "UserOID"       : record.get('_User'),
-                "Creator"       : storyCreator
+                "Creator"       : artifactCreator
             };
             records.push(newRecord);
         });
 
-        me._storyRecords = records;
+        me._artifactRecords = records;
         me._makeGrid();
     },
 
     _sortArrays: function(arr, sortArr) {
+
+        // console.log('_sortArrays');
+
         var result = [];
         for(var i=0; i < arr.length; i++) {
             result[i] = arr[sortArr[i]];
@@ -218,6 +269,9 @@
     },
 
     _stringArrayToIntArray: function(stringArray) {
+
+        // console.log('_stringArrayToIntArray');
+
         var result = [];
         Ext.Array.each(stringArray, function(thisString) {
             result.push(parseInt(thisString, 10));
@@ -227,23 +281,25 @@
 
     _makeGrid : function() {
 
+        // console.log('_makeGrid');
+
         var me = this;
 
-        if (me._storyGrid) {
-            me._storyGrid.destroy();
+        if (me._artifactGrid) {
+            me._artifactGrid.destroy();
         }
 
         me.setLoading(false);
 
         var gridStore = Ext.create('Rally.data.custom.Store', {
-            data: me._storyRecords,
+            data: me._artifactRecords,
             groupField: 'Creator',
             pageSize: 200,
             remoteSort: false
         });
 
-        me._storyGrid = Ext.create('Rally.ui.grid.Grid', {
-            itemId: 'storyGrid',
+        me._artifactGrid = Ext.create('Rally.ui.grid.Grid', {
+            itemId: 'artifactGrid',
             store: gridStore,
             features: [
                 {
@@ -262,20 +318,20 @@
                 {
                     text: 'Name', dataIndex: 'Name', flex: 1
                 },
-                {   text: 'ScheduleState', dataIndex: 'ScheduleState'
-                },
                 {
                     text: 'Date Created', dataIndex: 'CreationDate', flex: 1
                 }
             ]
         });
 
-        me.down('#gridContainer').add(me._storyGrid);
-        me._storyGrid.reconfigure(gridStore);
+        me.down('#gridContainer').add(me._artifactGrid);
+        me._artifactGrid.reconfigure(gridStore);
 
     },
 
     _nicerDateString: function(datestring) {
+
+        // console.log('_nicerDateString');
 
         return datestring.replace(/T/," ").replace(/Z/, " UTC");
 
@@ -283,27 +339,30 @@
 
     _noArtifactsNotify: function() {
 
-        if (this._storyGrid) {
-            this._storyGrid.destroy();
+        // console.log('_noArtifactsNotify');
+
+        if (this._artifactGrid) {
+            this._artifactGrid.destroy();
         }
 
         me.setLoading(false);
 
-        this._storyGrid = this.down('#gridContainer').add({
+        this._artifactGrid = this.down('#gridContainer').add({
             xtype: 'container',
-            html: "No Stories found."
+            html: "No Artifacts found."
         });
     }
 
 });
 
             Rally.launchApp('CustomApp', {
-                name:"Stories-ByCreator",
+                name:"Artifacts-ByCreator",
 	            parentRepos:""
             });
 
         });
     </script>
+
 
 
     <style type="text/css">
