@@ -30,7 +30,7 @@
     _snapshotStore: null,
     _artifactRecords: [],
     _artifactCreatorsByArtifactOID: {},
-    _usersByUserOID: {},
+    _usersByUserOID: null,
     _artifactGrid: null,
 
     launch: function() {
@@ -76,36 +76,47 @@
         me._currentUser = this.getContext().getUser();
         me._currentUserName = me._currentUser._refObjectName;
 
-        // First let's build a cache of UserNames by User ObjectID so we
-        // can hydrate a friendly username onto the lookback data
-        // (which contains only User OIDs)
-        var userStore = Ext.create('Rally.data.wsapi.Store', {
-            model: 'User',
-            fetch: true,
-            autoLoad: true,
-            limit: Infinity,
-            filters: [
-                {
-                    property: 'UserName',
-                    operator: 'contains',
-                    value: '@'
-                }
-            ],
-            listeners: {
-                load: function(store, data, success) {
-                    Ext.Array.each(data, function(record){
-                        var userOID = record.get('ObjectID');
-                        me._usersByUserOID[userOID.toString()] = record;
-                    });
+        // Only build users cache once.
+        if (me._usersByUserOID === null) {
 
-                    me.setLoading("Retrieving Artifacts...");
+            me._usersByUserOID = {};
 
-                    // Now go get Story Data from Lookback
-                    // Query for story snapshot 0's
-                    me._getArtifactZeroSnapshots();
+            // First let's build a cache of UserNames by User ObjectID so we
+            // can hydrate a friendly username onto the lookback data
+            // (which contains only User OIDs)
+
+            me.setLoading("Building Cache of Users...");
+
+            var userStore = Ext.create('Rally.data.wsapi.Store', {
+                model: 'User',
+                fetch: true,
+                autoLoad: true,
+                limit: Infinity,
+                filters: [
+                    {
+                        property: 'UserName',
+                        operator: 'contains',
+                        value: '@'
+                    }
+                ],
+                listeners: {
+                    load: function(store, data, success) {
+                        Ext.Array.each(data, function(record){
+                            var userOID = record.get('ObjectID');
+                            me._usersByUserOID[userOID.toString()] = record;
+                        });
+
+                        // Now go get Story Data from Lookback
+                        // Query for story snapshot 0's
+                        me._getArtifactZeroSnapshots();
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            // Now go get Story Data from Lookback
+            // Query for story snapshot 0's
+            me._getArtifactZeroSnapshots();
+        }
     },
 
     _getArtifactZeroSnapshots: function() {
@@ -113,6 +124,7 @@
         // console.log('_getArtifactZeroSnapshots');
 
         var me = this;
+        me.setLoading("Retrieving Artifacts...");
         me._selectedArtifactType = me._artifactTypeCombobox.getValue();
 
         var currentUserOID = me._currentUser.ObjectID;
